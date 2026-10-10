@@ -1,0 +1,19 @@
+{
+  "name": "incognito-backend",
+  "version": "1.0.0",
+  "description": "Incognito - Privacy-Preserving Anonymous College Complaints Backend",
+  "type": "module",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "test": "node tests/test_database.js && node tests/test_enrollment.js && node tests/test_crypto_encoding.js && node tests/test_complaint_context.js && node tests/test_proof_verification.js && node tests/test_submission.js"
+  },
+  "dependencies": {
+    "@semaphore-protocol/core": "^4.2.0",
+    "better-sqlite3": "^13.0.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2"
+  }
+}
