@@ -5,6 +5,7 @@ import dotenv from 'dotenv';
 import enrollmentRouter from './routes/enrollment.js';
 import complaintContextRouter from './routes/complaintContext.js';
 import submitRouter from './routes/submit.js';
+import semaphoreGroupRouter from './routes/semaphoreGroup.js';
 
 dotenv.config();
 
@@ -31,5 +32,6 @@ app.get('/api/health', (req, res) => {
 app.use('/api', enrollmentRouter);
 app.use('/api', complaintContextRouter);
 app.use('/api', submitRouter);
+app.use('/api', semaphoreGroupRouter);
 
 export default app;

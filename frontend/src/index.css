@@ -1,0 +1,16 @@
+@import "tailwindcss";
+
+@layer base {
+  body {
+    background-color: #0D173B;
+    color: #F7F8FA;
+    font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    min-height: 100vh;
+  }
+
+  ::selection {
+    background-color: #E2D64B;
+    color: #0D173B;
+  }
+}
