@@ -9,12 +9,7 @@ import {
 import { getGroupRoot } from '../semaphore/groupService.js';
 import { verifyComplaintProof } from '../services/proofVerificationService.js';
 import { moderateComplaintText } from '../services/moderationService.js';
-import {
-  generateReportId,
-  generateQueueId,
-  calculateQueueAvailableAfter,
-  generateTrackingCode
-} from '../services/queueService.js';
+import { generateTrackingCode } from '../services/queueService.js';
 
 const router = express.Router();
 
@@ -44,8 +39,9 @@ const router = express.Router();
  * 11. If moderation REJECTS: stop without consuming nullifier.
  * 12. If moderation ACCEPTS: execute atomic SQLite transaction:
  *     - INSERT nullifier into used_nullifiers (uniqueness gate)
- *     - INSERT report into reports
- *     - INSERT queue row into queue
+ *     - UPSERT aggregate bucket in insights (topic_id + server_day counters)
+ *       NOTE: the original complaint text is NEVER persisted. Only aggregate
+ *       counters (submission_count, warn_count) are retained.
  * 13. Return { ok: true, trackingCode: "..." }
  */
 router.post('/submit', async (req, res) => {
@@ -128,28 +124,25 @@ router.post('/submit', async (req, res) => {
     // 12. Moderation ACCEPTED (ALLOW or WARN) -> Execute atomic SQLite transaction
     const db = getDatabase();
     const nullifierStr = String(proof.nullifier);
-    const reportId = generateReportId();
-    const queueId = generateQueueId();
-    const availableAfter = calculateQueueAvailableAfter();
+    const warnIncrement = moderation.action === 'WARN' ? 1 : 0;
     const trackingCode = generateTrackingCode();
 
     try {
       const submitTx = db.transaction(() => {
         // Step A: Direct INSERT into used_nullifiers (uniqueness gate)
-        // If nullifier already exists, PRIMARY KEY constraint immediately throws SQLite error
+        // If nullifier already exists, PRIMARY KEY constraint immediately throws SQLite error,
+        // which aborts the whole transaction -> aggregates are never double-counted.
         db.prepare('INSERT INTO used_nullifiers (nullifier) VALUES (?)').run(nullifierStr);
 
-        // Step B: Insert report into reports with exact received text
+        // Step B: Increment the aggregate bucket for (topicId, serverDay).
+        // CRITICAL: the original complaint text is never passed to any SQL statement.
         db.prepare(`
-          INSERT INTO reports (report_id, topic_id, complaint_text, status)
-          VALUES (?, ?, ?, 'pending')
-        `).run(reportId, topicId, text);
-
-        // Step C: Insert corresponding queue row
-        db.prepare(`
-          INSERT INTO queue (queue_id, report_id, available_after, status)
-          VALUES (?, ?, ?, 'queued')
-        `).run(queueId, reportId, availableAfter);
+          INSERT INTO insights (topic_id, server_day, submission_count, warn_count)
+          VALUES (?, ?, 1, ?)
+          ON CONFLICT(topic_id, server_day) DO UPDATE SET
+            submission_count = submission_count + 1,
+            warn_count = warn_count + excluded.warn_count
+        `).run(topicId, serverDay, warnIncrement);
       });
 
       submitTx();

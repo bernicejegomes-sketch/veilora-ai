@@ -6,6 +6,7 @@ import enrollmentRouter from './routes/enrollment.js';
 import complaintContextRouter from './routes/complaintContext.js';
 import submitRouter from './routes/submit.js';
 import semaphoreGroupRouter from './routes/semaphoreGroup.js';
+import insightsRouter from './routes/insights.js';
 import { createRateLimiter } from './middleware/rateLimiter.js';
 
 dotenv.config();
@@ -59,5 +60,6 @@ app.use('/api', enrollmentRouter);
 app.use('/api', complaintContextRouter);
 app.use('/api', submitRouter);
 app.use('/api', semaphoreGroupRouter);
+app.use('/api', insightsRouter);
 
 export default app;

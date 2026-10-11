@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import Database from 'better-sqlite3';
 import { initDatabase, closeDatabase, resolveDatabasePath } from '../src/db/database.js';
 import { REQUIRED_TABLES } from '../src/db/schema.js';
 import fs from 'node:fs';
@@ -111,29 +112,36 @@ assert.ok(
 );
 console.log('✔ Test 6 Passed: No column or FK connecting members to commitments.');
 
-// Test 7: No database column or FK connecting commitments to reports
-console.log('Test 7: Checking privacy separation: commitments <-> reports...');
-const reportCols = getTableColumns('reports');
+// Test 7: No legacy per-submission tables; no complaint text column anywhere
+console.log('Test 7: Verifying no per-submission storage and no complaint_text column...');
 
+assert.ok(
+  !existingTables.includes('reports'),
+  `reports table must NOT exist (aggregate-only design). Found: ${existingTables.join(', ')}`
+);
+assert.ok(
+  !existingTables.includes('queue'),
+  `queue table must NOT exist (aggregate-only design). Found: ${existingTables.join(', ')}`
+);
+
+const complaintTextColumns = [];
+for (const table of existingTables) {
+  for (const col of getTableColumns(table)) {
+    if (col.includes('complaint') || col.includes('text') || col.includes('message')) {
+      complaintTextColumns.push(`${table}.${col}`);
+    }
+  }
+}
+assert.deepStrictEqual(
+  complaintTextColumns,
+  [],
+  `No table may contain a complaint text column. Found: ${complaintTextColumns.join(', ')}`
+);
 assert.ok(
   !commitmentCols.some((col) => col.includes('report')),
   `commitments table must NOT contain report columns. Found: ${commitmentCols.join(', ')}`
 );
-assert.ok(
-  !reportCols.some((col) => col.includes('commitment') || col.includes('roll_no') || col.includes('nullifier')),
-  `reports table must NOT contain commitment, roll_no, or nullifier columns. Found: ${reportCols.join(', ')}`
-);
-
-const reportFks = getForeignKeys('reports');
-assert.ok(
-  !reportFks.some((fk) => ['commitments', 'members', 'used_nullifiers'].includes(fk.table)),
-  'reports table must NOT reference commitments, members, or used_nullifiers'
-);
-assert.ok(
-  !commitmentFks.some((fk) => fk.table === 'reports'),
-  'commitments table must NOT reference reports'
-);
-console.log('✔ Test 7 Passed: No column or FK connecting commitments to reports.');
+console.log('✔ Test 7 Passed: No reports/queue tables and no complaint text column anywhere.');
 
 // Test 8: used_nullifiers does NOT contain report_id or link to reports
 console.log('Test 8: Checking privacy separation: used_nullifiers does not contain report_id...');
@@ -153,26 +161,30 @@ assert.ok(
 );
 console.log('✔ Test 8 Passed: used_nullifiers contains no report_id, identity references, or FKs.');
 
-// Test 8b: Timing correlation prevention: verify created_at removed from used_nullifiers and reports
-console.log('Test 8b: Checking timing correlation prevention (no created_at on used_nullifiers or reports)...');
+// Test 8b: Timing correlation prevention: no per-submission timestamps retained
+console.log('Test 8b: Checking timing correlation prevention (no per-submission timestamps)...');
 assert.ok(
   !nullifierCols.includes('created_at'),
   'used_nullifiers must NOT contain persistent created_at timestamp'
 );
+
+const insightsCols = getTableColumns('insights');
+const themeCols = getTableColumns('insight_themes');
 assert.ok(
-  !reportCols.includes('created_at'),
-  'reports must NOT contain persistent created_at timestamp'
+  !insightsCols.includes('created_at') &&
+    !insightsCols.includes('report_id') &&
+    !insightsCols.includes('nullifier'),
+  `insights must contain only aggregate counters. Found: ${insightsCols.join(', ')}`
+);
+assert.ok(
+  !themeCols.includes('created_at') && !themeCols.includes('nullifier') && !themeCols.includes('report_id'),
+  `insight_themes must contain only aggregate buckets. Found: ${themeCols.join(', ')}`
 );
 assert.ok(
   memberCols.includes('created_at'),
   'members should retain created_at for OTP lifecycle management'
 );
-const queueCols = getTableColumns('queue');
-assert.ok(
-  queueCols.includes('created_at'),
-  'queue should retain created_at for queue scheduling'
-);
-console.log('✔ Test 8b Passed: created_at removed from used_nullifiers and reports; retained in members and queue.');
+console.log('✔ Test 8b Passed: No per-submission timestamps retained; only aggregate buckets.');
 
 // Test 9: The database can be safely closed
 console.log('Test 9: Verifying database safe closure...');
@@ -200,5 +212,85 @@ for (const ext of ['-wal', '-shm', '-journal']) {
   }
 }
 console.log('✔ Test 10 Passed: File-based database created and cleaned up successfully.');
+
+// Test 11: Legacy migration discards reports/queue and purges complaint text (best-effort)
+console.log('Test 11: Verifying legacy migration to aggregate-only schema...');
+const legacyPath = path.resolve('./data/test_migration.db');
+const legacyFiles = [legacyPath, legacyPath + '-wal', legacyPath + '-shm', legacyPath + '-journal'];
+for (const p of legacyFiles) {
+  if (fs.existsSync(p)) fs.unlinkSync(p);
+}
+
+// Fabricate a legacy database containing per-submission complaint text.
+const legacyDb = new Database(legacyPath);
+legacyDb.exec(`
+  CREATE TABLE reports (
+    report_id TEXT PRIMARY KEY,
+    topic_id TEXT NOT NULL,
+    complaint_text TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending'
+  );
+  CREATE TABLE queue (
+    queue_id TEXT PRIMARY KEY,
+    report_id TEXT NOT NULL,
+    available_after INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'queued',
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (report_id) REFERENCES reports(report_id) ON DELETE CASCADE
+  );
+  INSERT INTO reports (report_id, topic_id, complaint_text) VALUES ('r1', 'FACULTY', 'LEGACY_SECRET_COMPLAINT_TEXT');
+  INSERT INTO queue (queue_id, report_id, available_after) VALUES ('q1', 'r1', 123456789);
+`);
+legacyDb.close();
+
+const migratedDb = initDatabase(legacyPath);
+const migratedTables = migratedDb
+  .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'")
+  .all()
+  .map((row) => row.name);
+
+assert.ok(!migratedTables.includes('reports'), 'reports must be dropped after migration');
+assert.ok(!migratedTables.includes('queue'), 'queue must be dropped after migration');
+assert.ok(migratedTables.includes('insights'), 'insights must exist after migration');
+assert.ok(migratedTables.includes('insight_themes'), 'insight_themes must exist after migration');
+assert.strictEqual(
+  migratedDb.pragma('user_version', { simple: true }),
+  1,
+  'user_version must be bumped to 1'
+);
+
+// Legacy counts must be discarded, never reconstructed.
+const legacyInsightRows = migratedDb.prepare('SELECT count(*) AS cnt FROM insights').get().cnt;
+assert.strictEqual(legacyInsightRows, 0, 'legacy report counts must be discarded, not reconstructed');
+
+// Best-effort purge: legacy complaint text must not be findable in any text column.
+let legacyTextHits = 0;
+for (const table of migratedTables) {
+  const cols = migratedDb.prepare(`PRAGMA table_info(${table})`).all();
+  for (const c of cols) {
+    if ((c.type || '').toUpperCase().includes('TEXT')) {
+      legacyTextHits += migratedDb
+        .prepare(`SELECT count(*) AS cnt FROM ${table} WHERE ${c.name} LIKE ?`)
+        .get('%LEGACY_SECRET_COMPLAINT_TEXT%').cnt;
+    }
+  }
+}
+assert.strictEqual(legacyTextHits, 0, 'legacy complaint text must not remain in any text column');
+
+closeDatabase(migratedDb);
+
+// Migration must be idempotent: re-opening the migrated database is a no-op.
+const reopenedDb = initDatabase(legacyPath);
+assert.strictEqual(
+  reopenedDb.pragma('user_version', { simple: true }),
+  1,
+  'migration must be idempotent on re-open'
+);
+closeDatabase(reopenedDb);
+
+for (const p of legacyFiles) {
+  if (fs.existsSync(p)) fs.unlinkSync(p);
+}
+console.log('✔ Test 11 Passed: Legacy reports/queue dropped, counts discarded, text purged (best-effort).');
 
 console.log('\n--- ALL DATABASE FOUNDATION TESTS PASSED SUCCESSFULLY! ---');

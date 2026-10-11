@@ -19,20 +19,25 @@ CREATE TABLE IF NOT EXISTS used_nullifiers (
   nullifier TEXT PRIMARY KEY
 );
 
-CREATE TABLE IF NOT EXISTS reports (
-  report_id TEXT PRIMARY KEY,
-  topic_id TEXT NOT NULL,
-  complaint_text TEXT NOT NULL,
-  status TEXT NOT NULL DEFAULT 'pending'
+-- Aggregate-only analytics: NO per-submission rows, NO complaint text, NO identifiers.
+-- One row per (topic, server_day) bucket. This is the only retained complaint-derived data.
+CREATE TABLE IF NOT EXISTS insights (
+  topic_id         TEXT NOT NULL,
+  server_day       TEXT NOT NULL,
+  submission_count INTEGER NOT NULL DEFAULT 0,
+  warn_count       INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (topic_id, server_day)
 );
 
-CREATE TABLE IF NOT EXISTS queue (
-  queue_id TEXT PRIMARY KEY,
-  report_id TEXT NOT NULL,
-  available_after INTEGER NOT NULL,
-  status TEXT NOT NULL DEFAULT 'queued',
-  created_at TEXT NOT NULL DEFAULT (datetime('now')),
-  FOREIGN KEY (report_id) REFERENCES reports(report_id) ON DELETE CASCADE
+-- Future AI-generated themes/summaries, stored only as aggregate buckets.
+-- Never linked to a submission, nullifier, or identity. Displayed subject to k-anonymity (k=3).
+CREATE TABLE IF NOT EXISTS insight_themes (
+  topic_id      TEXT NOT NULL,
+  server_day    TEXT NOT NULL,
+  theme_key     TEXT NOT NULL,
+  theme_label   TEXT NOT NULL,
+  support_count INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (topic_id, server_day, theme_key)
 );
 `;
 
@@ -40,6 +45,6 @@ export const REQUIRED_TABLES = [
   'members',
   'commitments',
   'used_nullifiers',
-  'reports',
-  'queue'
+  'insights',
+  'insight_themes'
 ];

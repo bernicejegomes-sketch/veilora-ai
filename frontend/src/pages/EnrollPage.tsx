@@ -18,6 +18,31 @@ const DEMO_ROSTER: Record<string, { dob: string; name: string }> = {
   DEV003: { dob: '2007-03-03', name: 'Test Student Three' },
   DEV004: { dob: '2007-04-04', name: 'Test Student Four' },
   DEV005: { dob: '2007-05-05', name: 'Test Student Five' },
+  DEV006: { dob: '2007-06-06', name: 'Test Student Six' },
+  DEV007: { dob: '2007-07-07', name: 'Test Student Seven' },
+  DEV008: { dob: '2007-08-08', name: 'Test Student Eight' },
+  DEV009: { dob: '2007-09-09', name: 'Test Student Nine' },
+  DEV010: { dob: '2007-10-10', name: 'Test Student Ten' },
+  DEV011: { dob: '2007-11-11', name: 'Test Student Eleven' },
+  DEV012: { dob: '2007-12-12', name: 'Test Student Twelve' },
+  DEV013: { dob: '2007-01-13', name: 'Test Student Thirteen' },
+  DEV014: { dob: '2007-02-14', name: 'Test Student Fourteen' },
+  DEV015: { dob: '2007-03-15', name: 'Test Student Fifteen' },
+  DEV016: { dob: '2007-04-16', name: 'Test Student Sixteen' },
+  DEV017: { dob: '2007-05-17', name: 'Test Student Seventeen' },
+  DEV018: { dob: '2007-06-18', name: 'Test Student Eighteen' },
+  DEV019: { dob: '2007-07-19', name: 'Test Student Nineteen' },
+  DEV020: { dob: '2007-08-20', name: 'Test Student Twenty' },
+  DEV021: { dob: '2007-09-21', name: 'Test Student Twenty-One' },
+  DEV022: { dob: '2007-10-22', name: 'Test Student Twenty-Two' },
+  DEV023: { dob: '2007-11-23', name: 'Test Student Twenty-Three' },
+  DEV024: { dob: '2007-12-24', name: 'Test Student Twenty-Four' },
+  DEV025: { dob: '2007-01-25', name: 'Test Student Twenty-Five' },
+  DEV026: { dob: '2007-02-26', name: 'Test Student Twenty-Six' },
+  DEV027: { dob: '2007-03-27', name: 'Test Student Twenty-Seven' },
+  DEV028: { dob: '2007-04-28', name: 'Test Student Twenty-Eight' },
+  DEV029: { dob: '2007-05-29', name: 'Test Student Twenty-Nine' },
+  DEV030: { dob: '2007-06-30', name: 'Test Student Thirty' },
 };
 
 export const EnrollPage: React.FC = () => {
@@ -159,7 +184,7 @@ export const EnrollPage: React.FC = () => {
               </Button>
             </div>
             <p className="text-[11px] text-slate-400 mt-1">
-              Demo presets: DEV001 through DEV005
+              Demo presets: DEV001 through DEV030
             </p>
           </div>
 

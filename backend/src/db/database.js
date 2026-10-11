@@ -4,6 +4,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import { SCHEMA_SQL } from './schema.js';
+import { runMigrations } from './migrations.js';
 
 dotenv.config();
 
@@ -49,6 +50,9 @@ export function initDatabase(customPath = null) {
 
   // Initialize schema
   db.exec(SCHEMA_SQL);
+
+  // Apply versioned, idempotent migrations (drops legacy per-submission storage)
+  runMigrations(db);
 
   dbInstance = db;
   return db;

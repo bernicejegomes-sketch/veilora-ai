@@ -52,6 +52,43 @@ async function postJson(endpoint, body) {
   return { status: res.status, data };
 }
 
+// Scan every TEXT column of every user table for a needle. Used to prove that
+// complaint text, identity values, and tracking codes are never persisted.
+function scanAllTextColumns(needle) {
+  const tables = db
+    .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'")
+    .all();
+  let hits = 0;
+  for (const { name } of tables) {
+    const cols = db.prepare(`PRAGMA table_info(${name})`).all();
+    for (const c of cols) {
+      if ((c.type || '').toUpperCase().includes('TEXT')) {
+        hits += db
+          .prepare(`SELECT count(*) AS cnt FROM ${name} WHERE ${c.name} LIKE ?`)
+          .get(`%${needle}%`).cnt;
+      }
+    }
+  }
+  return hits;
+}
+
+function getInsight(topicId, day) {
+  return (
+    db
+      .prepare('SELECT submission_count, warn_count FROM insights WHERE topic_id = ? AND server_day = ?')
+      .get(topicId, day) || { submission_count: 0, warn_count: 0 }
+  );
+}
+
+function assertNoLegacyStorage() {
+  const names = db
+    .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'")
+    .all()
+    .map((r) => r.name);
+  assert.ok(!names.includes('reports'), 'reports table must not exist (aggregate-only design)');
+  assert.ok(!names.includes('queue'), 'queue table must not exist (aggregate-only design)');
+}
+
 try {
   const validTopic = 'INFRASTRUCTURE';
   const serverDay = getServerDay();
@@ -147,8 +184,7 @@ try {
   // Test 8: Duplicate nullifier is rejected (replay attack)
   console.log('Test 8: Duplicate nullifier is rejected...');
   const initialNullifiersCount = db.prepare('SELECT count(*) as cnt FROM used_nullifiers').get().cnt;
-  const initialReportsCount = db.prepare('SELECT count(*) as cnt FROM reports').get().cnt;
-  const initialQueueCount = db.prepare('SELECT count(*) as cnt FROM queue').get().cnt;
+  const infraBeforeDuplicate = getInsight(validTopic, serverDay);
 
   // Re-submit proof1 (already submitted in Test 1)
   const res8 = await postJson('/api/submit', {
@@ -161,19 +197,19 @@ try {
   assert.match(res8.data.error, /already been submitted/);
   console.log('✔ Test 8 Passed: Duplicate nullifier rejected with 409.');
 
-  // Test 9 & 10: Duplicate nullifier does NOT create a second report or queue row
-  console.log('Test 9 & 10: Verifying no duplicate reports or queue rows were created...');
-  const afterReportsCount = db.prepare('SELECT count(*) as cnt FROM reports').get().cnt;
-  const afterQueueCount = db.prepare('SELECT count(*) as cnt FROM queue').get().cnt;
+  // Test 9 & 10: Duplicate nullifier does NOT increment aggregates or create rows
+  console.log('Test 9 & 10: Verifying duplicate submission does not increment aggregates...');
+  const infraAfterDuplicate = getInsight(validTopic, serverDay);
   const afterNullifiersCount = db.prepare('SELECT count(*) as cnt FROM used_nullifiers').get().cnt;
 
-  assert.strictEqual(afterReportsCount, initialReportsCount);
-  assert.strictEqual(afterQueueCount, initialQueueCount);
+  assert.strictEqual(infraAfterDuplicate.submission_count, infraBeforeDuplicate.submission_count);
+  assert.strictEqual(infraAfterDuplicate.warn_count, infraBeforeDuplicate.warn_count);
   assert.strictEqual(afterNullifiersCount, initialNullifiersCount);
-  console.log('✔ Test 9 & 10 Passed: Duplicate nullifier did not create second report or queue row.');
+  console.log('✔ Test 9 & 10 Passed: Duplicate nullifier did not increment aggregates.');
 
-  // Test 11: If moderation rejects a complaint: nullifier is NOT consumed, no report/queue created
-  console.log('Test 11: Moderation rejection does not consume nullifier or insert report/queue...');
+  // Test 11: If moderation rejects a complaint: nullifier is NOT consumed, no aggregate change
+  console.log('Test 11: Moderation rejection does not consume nullifier or increment aggregates...');
+  const facultyBeforeReject = getInsight('FACULTY', serverDay);
   const spamText = 'hi'; // Too short (< 10 chars)
   const spamMsg = encodeComplaintMessage(spamText);
   const proofSpam = await generateProof(id2, group, spamMsg, facultyScope);
@@ -190,7 +226,10 @@ try {
   // Check that id2's nullifier was NOT inserted into used_nullifiers
   const nullifierCheck = db.prepare('SELECT 1 FROM used_nullifiers WHERE nullifier = ?').get(proofSpam.nullifier.toString());
   assert.strictEqual(nullifierCheck, undefined, 'Nullifier must NOT be consumed on moderation rejection');
-  console.log('✔ Test 11 Passed: Moderation rejection did not consume nullifier or insert report.');
+  const facultyAfterReject = getInsight('FACULTY', serverDay);
+  assert.strictEqual(facultyAfterReject.submission_count, facultyBeforeReject.submission_count);
+  assert.strictEqual(facultyAfterReject.warn_count, facultyBeforeReject.warn_count);
+  console.log('✔ Test 11 Passed: Moderation rejection did not consume nullifier or increment aggregates.');
 
   // Test 12: A moderation WARN does not automatically reject a genuine complaint
   console.log('Test 12: Moderation WARN still allows genuine complaint to be accepted...');
@@ -207,11 +246,14 @@ try {
   assert.strictEqual(res12.data.ok, true);
   console.log('✔ Test 12 Passed: Moderation WARN permitted genuine complaint.');
 
-  // Test 13: Stored report text exactly equals the text that was cryptographically bound
-  console.log('Test 13: Verifying stored report text byte-for-byte equality...');
-  const storedReport = db.prepare('SELECT complaint_text FROM reports WHERE topic_id = ?').get('FACULTY');
-  assert.strictEqual(storedReport.complaint_text, warnText);
-  console.log('✔ Test 13 Passed: Stored report text strictly matches bound text.');
+  // Test 13: Complaint text is never persisted; the aggregate increments exactly once
+  console.log('Test 13: Verifying complaint text is never persisted and count incremented once...');
+  assert.strictEqual(scanAllTextColumns(warnText), 0, 'complaint text must never be stored in any table');
+  const facultyInsight = getInsight('FACULTY', serverDay);
+  assert.strictEqual(facultyInsight.submission_count, 1, 'FACULTY submission_count must be exactly 1');
+  assert.strictEqual(facultyInsight.warn_count, 1, 'FACULTY warn_count must be exactly 1');
+  assertNoLegacyStorage();
+  console.log('✔ Test 13 Passed: Complaint text not persisted; aggregate incremented exactly once.');
 
   // Test 14: Client cannot override serverDay by sending serverDay in request
   console.log('Test 14: Client cannot override serverDay...');
@@ -258,52 +300,49 @@ try {
   });
   assert.strictEqual(res16.status, 200);
 
-  // Check reports table schema & stored data: no rollNo, studentId, or deviceId column or content
-  const lastReport = db.prepare('SELECT * FROM reports WHERE topic_id = ?').get('OTHER');
-  assert.strictEqual(lastReport.complaint_text, textOther);
-  assert.strictEqual(lastReport.rollNo, undefined);
-  assert.strictEqual(lastReport.studentId, undefined);
-  assert.strictEqual(lastReport.deviceId, undefined);
-  console.log('✔ Test 16 Passed: Extra identity fields ignored and never stored in database.');
+  // No per-submission storage exists; only aggregates retained. Identity fields never stored.
+  assertNoLegacyStorage();
+  assert.strictEqual(getInsight('OTHER', serverDay).submission_count, 1, 'OTHER count must be exactly 1');
+  assert.strictEqual(scanAllTextColumns('DEV999'), 0, 'rollNo must never be persisted');
+  assert.strictEqual(scanAllTextColumns('STU123'), 0, 'studentId must never be persisted');
+  assert.strictEqual(scanAllTextColumns('DEVICE-ABC'), 0, 'deviceId must never be persisted');
+  console.log('✔ Test 16 Passed: Extra identity fields ignored; only aggregates retained.');
 
-  // Test 17: Successful submission creates exactly 1 used_nullifiers, 1 report, 1 queue row
+  // Test 17: Successful submissions retain exactly 3 nullifiers and 3 aggregate buckets
   console.log('Test 17: Successful submission state counts...');
   const totalNullifiers = db.prepare('SELECT count(*) as cnt FROM used_nullifiers').get().cnt;
-  const totalReports = db.prepare('SELECT count(*) as cnt FROM reports').get().cnt;
-  const totalQueue = db.prepare('SELECT count(*) as cnt FROM queue').get().cnt;
-  assert.strictEqual(totalNullifiers, 3); // Test 1 (id1), Test 12 (id2), Test 16 (id3)
-  assert.strictEqual(totalReports, 3);
-  assert.strictEqual(totalQueue, 3);
-  console.log('✔ Test 17 Passed: Exact 1-to-1-to-1 rows created across tables.');
+  assert.strictEqual(totalNullifiers, 3); // Test 1 (id1/INFRA), Test 12 (id2/FACULTY), Test 16 (id3/OTHER)
+  assert.strictEqual(getInsight('INFRASTRUCTURE', serverDay).submission_count, 1);
+  assert.strictEqual(getInsight('FACULTY', serverDay).submission_count, 1);
+  assert.strictEqual(getInsight('OTHER', serverDay).submission_count, 1);
+  assertNoLegacyStorage();
+  console.log('✔ Test 17 Passed: Exactly 3 nullifiers and 3 aggregate buckets (one per topic).');
 
   // Test 18: Transaction rollback on failure
   console.log('Test 18: Verifying atomic transaction rollback when later operation fails...');
   const nullifiersBefore = db.prepare('SELECT count(*) as cnt FROM used_nullifiers').get().cnt;
-  const reportsBefore = db.prepare('SELECT count(*) as cnt FROM reports').get().cnt;
-  const queueBefore = db.prepare('SELECT count(*) as cnt FROM queue').get().cnt;
+  const otherBeforeRollback = getInsight('OTHER', serverDay).submission_count;
 
-  // Intentionally test transaction failure inside db.transaction
+  // Intentionally test transaction failure inside db.transaction: both the nullifier
+  // insert and the aggregate increment must roll back atomically.
   const testRollbackTx = db.transaction(() => {
     db.prepare('INSERT INTO used_nullifiers (nullifier) VALUES (?)').run('transient_nullifier_999');
-    db.prepare('INSERT INTO reports (report_id, topic_id, complaint_text, status) VALUES (?, ?, ?, ?)').run(
-      'transient_report_999',
-      'OTHER',
-      'This will fail on invalid foreign key or forced error',
-      'pending'
-    );
+    db.prepare(`
+      INSERT INTO insights (topic_id, server_day, submission_count, warn_count)
+      VALUES (?, ?, 1, 0)
+      ON CONFLICT(topic_id, server_day) DO UPDATE SET submission_count = submission_count + 1
+    `).run('OTHER', serverDay);
     throw new Error('SIMULATED_TRANSACTION_FAILURE');
   });
 
   assert.throws(() => testRollbackTx(), /SIMULATED_TRANSACTION_FAILURE/);
 
   const nullifiersAfter = db.prepare('SELECT count(*) as cnt FROM used_nullifiers').get().cnt;
-  const reportsAfter = db.prepare('SELECT count(*) as cnt FROM reports').get().cnt;
-  const queueAfter = db.prepare('SELECT count(*) as cnt FROM queue').get().cnt;
+  const otherAfterRollback = getInsight('OTHER', serverDay).submission_count;
 
   assert.strictEqual(nullifiersAfter, nullifiersBefore);
-  assert.strictEqual(reportsAfter, reportsBefore);
-  assert.strictEqual(queueAfter, queueBefore);
-  console.log('✔ Test 18 Passed: Atomic transaction rollbacks cleanly on any failure.');
+  assert.strictEqual(otherAfterRollback, otherBeforeRollback);
+  console.log('✔ Test 18 Passed: Atomic transaction rolls back both nullifier and aggregate.');
 
   // Test 19: Concurrent/repeated submissions with same nullifier result in only 1 accepted report
   console.log('Test 19: Concurrent submission with same nullifier permits only 1 accepted report...');
@@ -315,13 +354,15 @@ try {
   assert.ok(statuses.includes(409));
   console.log('✔ Test 19 Passed: Replayed nullifier rejected concurrently.');
 
-  // Test 20: Tracking code is returned and random-looking, no identity mapping created
+  // Test 20: Tracking code is returned, random-looking, and NEVER persisted
   console.log('Test 20: Tracking code randomness and privacy...');
   assert.match(res1.data.trackingCode, /^INC-[0-9A-F]{16}$/);
-  // Ensure tracking code is not in database
-  const trackingInDb = db.prepare("SELECT count(*) as cnt FROM reports WHERE complaint_text LIKE ?").get(`%${res1.data.trackingCode}%`).cnt;
-  assert.strictEqual(trackingInDb, 0);
-  console.log('✔ Test 20 Passed: Tracking code is random and unmapped.');
+  assert.strictEqual(
+    scanAllTextColumns(res1.data.trackingCode),
+    0,
+    'tracking code must never be persisted in any table'
+  );
+  console.log('✔ Test 20 Passed: Tracking code is random, returned, and never persisted.');
 
   // Test 21: Complaint text with Unicode works
   console.log('Test 21: Complaint text with Unicode characters works...');
@@ -344,10 +385,9 @@ try {
   });
   assert.strictEqual(res21.status, 200);
   assert.strictEqual(res21.data.ok, true);
-
-  const storedUnicode = db.prepare('SELECT complaint_text FROM reports WHERE complaint_text = ?').get(unicodeText);
-  assert.strictEqual(storedUnicode.complaint_text, unicodeText);
-  console.log('✔ Test 21 Passed: Unicode complaint text processed and preserved byte-for-byte.');
+  assert.strictEqual(scanAllTextColumns(unicodeText), 0, 'unicode complaint text must never be persisted');
+  assert.strictEqual(getInsight('OTHER', serverDay).submission_count, 2, 'OTHER count must increment to 2');
+  console.log('✔ Test 21 Passed: Unicode complaint processed; text not persisted; count incremented.');
 
   // Test 22: Complaint text with long text works
   console.log('Test 22: Long complaint text works...');
@@ -367,13 +407,15 @@ try {
   const modResult = moderateComplaintText(longText);
   assert.strictEqual(modResult.action, 'REJECT');
 
-  // Verify submitting it gets 422 rejected by moderation
+  // Verify submitting it gets 422 rejected by moderation (count must NOT change)
+  const otherBeforeLong = getInsight('OTHER', serverDay).submission_count;
   const res22 = await postJson('/api/submit', {
     proof: longProof,
     topicId: 'OTHER',
     text: longText
   });
   assert.strictEqual(res22.status, 422);
+  assert.strictEqual(getInsight('OTHER', serverDay).submission_count, otherBeforeLong, 'rejected long text must not increment count');
 
   // Now test genuine long text without repeated chars
   const genuineLongText = 'The university campus needs better infrastructure and maintenance in all academic blocks. '.repeat(50);
@@ -395,7 +437,13 @@ try {
   });
   assert.strictEqual(res22b.status, 200);
   assert.strictEqual(res22b.data.ok, true);
-  console.log('✔ Test 22 Passed: Long complaint text handled correctly.');
+  assert.strictEqual(scanAllTextColumns(genuineLongText), 0, 'long complaint text must never be persisted');
+  assert.strictEqual(
+    getInsight('OTHER', serverDay).submission_count,
+    otherBeforeLong + 1,
+    'accepted long text increments count exactly once'
+  );
+  console.log('✔ Test 22 Passed: Long text rejected case unchanged; accepted case incremented once.');
 
   // Test 23: Complaint text containing links is rejected by moderation
   console.log('Test 23: Complaint text containing spam links is rejected by moderation...');
@@ -419,6 +467,11 @@ try {
   assert.strictEqual(res23.status, 422);
   assert.strictEqual(res23.data.ok, false);
   assert.match(res23.data.error, /rejected by moderation/);
+  assert.strictEqual(
+    getInsight('OTHER', serverDay).submission_count,
+    otherBeforeLong + 1,
+    'spam-link rejection must not increment count'
+  );
   console.log('✔ Test 23 Passed: Complaint text with links rejected by moderation.');
 
   // Test 24: Exact complaint text is not modified before verification/storage
@@ -441,10 +494,9 @@ try {
     text: textWithSpaces
   });
   assert.strictEqual(res24.status, 200);
-
-  const storedSpaces = db.prepare('SELECT complaint_text FROM reports WHERE complaint_text = ?').get(textWithSpaces);
-  assert.strictEqual(storedSpaces.complaint_text, textWithSpaces);
-  console.log('✔ Test 24 Passed: Exact complaint text preserved with spaces intact.');
+  assert.strictEqual(scanAllTextColumns(textWithSpaces), 0, 'complaint text with spaces must never be persisted');
+  assert.strictEqual(getInsight('OTHER', serverDay).submission_count, 4, 'OTHER count must increment to 4');
+  console.log('✔ Test 24 Passed: Exact text not persisted; aggregate incremented once.');
 
   console.log('\n--- ALL 24 SUBMISSION TESTS PASSED SUCCESSFULLY! ---');
 } finally {

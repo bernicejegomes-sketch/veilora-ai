@@ -1,7 +1,7 @@
 /**
  * Configuration helper for Demo Mode.
  *
- * Demo Mode allows the use of synthetic DEV001–DEV005 roster and
+ * Demo Mode allows the use of synthetic DEV001–DEV030 roster and
  * the development OTP (e.g. 123456) for hackathon demonstration.
  *
  * For safety, DEMO_MODE is FALSE by default unless explicitly set to:

@@ -2,11 +2,13 @@ import assert from 'node:assert/strict';
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
+import { Identity } from '@semaphore-protocol/core';
 import app from '../src/app.js';
 import { initDatabase, closeDatabase } from '../src/db/database.js';
 import { syncRoster, findMember } from '../src/services/rosterService.js';
 import { issueOtp, DEFAULT_DEV_OTP } from '../src/services/otpService.js';
 import { isDemoModeEnabled } from '../src/config/demoMode.js';
+import { DEVELOPMENT_ROSTER } from '../src/config/roster.js';
 
 console.log('--- Running Incognito Demo Mode & Rate Limit Tests ---');
 
@@ -54,6 +56,15 @@ assert.equal(studentDemo.name, 'Test Student One');
 
 const otpResultDemo = issueOtp(dbDemo, 'DEV001');
 assert.ok(otpResultDemo.expiry > Date.now(), 'issueOtp succeeds and returns expiry in demo mode');
+
+// Roster expansion: exactly 30 synthetic students DEV001-DEV030 are seeded.
+assert.equal(DEVELOPMENT_ROSTER.length, 30, 'Roster must contain exactly 30 synthetic students');
+const student30 = findMember(dbDemo, 'DEV030');
+assert.ok(student30, 'DEV030 must be seeded when DEMO_MODE=true');
+assert.equal(student30.name, 'Test Student Thirty');
+assert.equal(student30.dob, '2007-06-30');
+const student31 = findMember(dbDemo, 'DEV031');
+assert.equal(student31, undefined, 'DEV031 must NOT be seeded (outside DEV001-DEV030)');
 
 closeDatabase(dbDemo);
 if (fs.existsSync(testDbPathDemo)) fs.unlinkSync(testDbPathDemo);
@@ -103,6 +114,42 @@ assert.equal(rateLimitedResponse.status, 429, 'Status must be 429 Too Many Reque
 assert.equal(rateLimitedResponse.data.ok, false);
 assert.ok(rateLimitedResponse.headers.get('retry-after'), 'Retry-After header must be set');
 console.log('  Passed: Excessive requests return HTTP 429 with Retry-After header.');
+
+// [TEST 4] Demo enrollment boundary: DEV030 accepted, DEV031 rejected.
+console.log('\n[TEST 4] Demo Enrollment Boundary: DEV030 accepted, DEV031 rejected');
+
+async function postJson(endpoint, body) {
+  const res = await fetch(`${baseUrl}${endpoint}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json().catch(() => ({}));
+  return { status: res.status, data };
+}
+
+issueOtp(dbHttp, 'DEV030', DEFAULT_DEV_OTP);
+const enroll30 = await postJson('/api/enroll', {
+  rollNo: 'DEV030',
+  otp: DEFAULT_DEV_OTP,
+  dob: '2007-06-30',
+  name: 'Test Student Thirty',
+  commitment: new Identity().commitment.toString(),
+});
+assert.equal(enroll30.status, 200, `DEV030 must be accepted, got ${enroll30.status}: ${JSON.stringify(enroll30.data)}`);
+assert.equal(enroll30.data.ok, true);
+
+const reject31 = await postJson('/api/enroll', {
+  rollNo: 'DEV031',
+  otp: DEFAULT_DEV_OTP,
+  dob: '2007-07-31',
+  name: 'Test Student Thirty-One',
+  commitment: new Identity().commitment.toString(),
+});
+assert.equal(reject31.status, 400, `DEV031 must be rejected, got ${reject31.status}`);
+assert.equal(reject31.data.ok, false);
+assert.equal(reject31.data.error, 'invalid student');
+console.log('  Passed: DEV030 enrolled (200); DEV031 rejected (400 invalid student).');
 
 // Clean up
 server.close();
