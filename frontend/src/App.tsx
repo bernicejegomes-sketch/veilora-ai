@@ -8,6 +8,7 @@ import { ReportTopicPage } from './pages/ReportTopicPage';
 import { ComplaintWritePage } from './pages/ComplaintWritePage';
 import { ReviewProofPage } from './pages/ReviewProofPage';
 import { SuccessPage } from './pages/SuccessPage';
+import { InsightsPage } from './pages/InsightsPage';
 
 export const App: React.FC = () => {
   return (
@@ -23,6 +24,7 @@ export const App: React.FC = () => {
             <Route path="/report/write" element={<ComplaintWritePage />} />
             <Route path="/report/review" element={<ReviewProofPage />} />
             <Route path="/report/success" element={<SuccessPage />} />
+            <Route path="/insights" element={<InsightsPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </div>

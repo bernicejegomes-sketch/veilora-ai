@@ -1,5 +1,6 @@
 import express from 'express';
 import { getDatabase } from '../db/database.js';
+import { isDemoModeEnabled } from '../config/demoMode.js';
 import {
   getTopicDayInsights,
   getThemeInsights,
@@ -24,6 +25,7 @@ router.get('/insights', (req, res) => {
     res.status(200).json({
       ok: true,
       threshold: K_ANONYMITY_THRESHOLD,
+      demoMode: isDemoModeEnabled(),
       topics: getTopicDayInsights(db),
       themes: getThemeInsights(db),
     });

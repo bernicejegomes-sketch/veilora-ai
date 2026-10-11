@@ -1,13 +1,29 @@
-import React from 'react';
-import { Link } from 'react-router-dom';
+import React, { useEffect } from 'react';
+import { Link, useLocation } from 'react-router-dom';
 import { Shield, Lock, FileText, ArrowRight, CheckCircle2 } from 'lucide-react';
 import { PageContainer } from '../components/PageContainer';
 import { Button } from '../components/Button';
 import { PrivacyCard } from '../components/PrivacyCard';
+import { SectionLink } from '../components/SectionLink';
 import { isEnrolled } from '../services/identityStorage';
 
 export const LandingPage: React.FC = () => {
   const enrolled = isEnrolled();
+  const { hash } = useLocation();
+
+  // Scroll to the requested section when arriving from another route or via
+  // browser Back/Forward; otherwise return to the top of the page.
+  useEffect(() => {
+    if (hash) {
+      const id = hash.replace(/^#/, '');
+      const el = document.getElementById(id);
+      if (el) {
+        requestAnimationFrame(() => el.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+      }
+    } else {
+      window.scrollTo({ top: 0 });
+    }
+  }, [hash]);
 
   return (
     <PageContainer maxWidth="6xl">
@@ -40,11 +56,11 @@ export const LandingPage: React.FC = () => {
               </Button>
             </Link>
 
-            <a href="#how-it-works" className="w-full sm:w-auto">
+            <SectionLink sectionId="how-it-works" className="w-full sm:w-auto">
               <Button variant="secondary" className="w-full sm:w-auto px-6 py-3 text-base">
                 How it works
               </Button>
-            </a>
+            </SectionLink>
           </div>
 
           <PrivacyCard

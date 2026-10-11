@@ -255,8 +255,8 @@ assert.ok(migratedTables.includes('insights'), 'insights must exist after migrat
 assert.ok(migratedTables.includes('insight_themes'), 'insight_themes must exist after migration');
 assert.strictEqual(
   migratedDb.pragma('user_version', { simple: true }),
-  1,
-  'user_version must be bumped to 1'
+  2,
+  'user_version must be bumped to 2'
 );
 
 // Legacy counts must be discarded, never reconstructed.
@@ -283,7 +283,7 @@ closeDatabase(migratedDb);
 const reopenedDb = initDatabase(legacyPath);
 assert.strictEqual(
   reopenedDb.pragma('user_version', { simple: true }),
-  1,
+  2,
   'migration must be idempotent on re-open'
 );
 closeDatabase(reopenedDb);
@@ -292,5 +292,70 @@ for (const p of legacyFiles) {
   if (fs.existsSync(p)) fs.unlinkSync(p);
 }
 console.log('✔ Test 11 Passed: Legacy reports/queue dropped, counts discarded, text purged (best-effort).');
+
+// Test 12: v1 -> v2 adds the generalized AI summary column idempotently
+console.log('Test 12: Verifying v1 -> v2 migration adds insight_themes.summary...');
+const v1Path = path.resolve('./data/test_migration_v2.db');
+const v1Files = [v1Path, v1Path + '-wal', v1Path + '-shm', v1Path + '-journal'];
+for (const p of v1Files) {
+  if (fs.existsSync(p)) fs.unlinkSync(p);
+}
+
+// Fabricate a v1-style database: aggregate tables but NO summary column.
+const v1Db = new Database(v1Path);
+v1Db.exec(`
+  CREATE TABLE insights (
+    topic_id TEXT NOT NULL,
+    server_day TEXT NOT NULL,
+    submission_count INTEGER NOT NULL DEFAULT 0,
+    warn_count INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (topic_id, server_day)
+  );
+  CREATE TABLE insight_themes (
+    topic_id TEXT NOT NULL,
+    server_day TEXT NOT NULL,
+    theme_key TEXT NOT NULL,
+    theme_label TEXT NOT NULL,
+    support_count INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (topic_id, server_day, theme_key)
+  );
+  INSERT INTO insight_themes (topic_id, server_day, theme_key, theme_label, support_count)
+    VALUES ('OTHER', '2026-01-01', 'noise', 'Excessive noise', 4);
+  PRAGMA user_version = 1;
+`);
+v1Db.close();
+
+const upDb = initDatabase(v1Path);
+const upThemeCols = upDb
+  .prepare('PRAGMA table_info(insight_themes)')
+  .all()
+  .map((c) => c.name);
+assert.ok(upThemeCols.includes('summary'), 'v2 migration must add insight_themes.summary');
+assert.strictEqual(
+  upDb.pragma('user_version', { simple: true }),
+  2,
+  'v1 -> v2 migration must set user_version to 2'
+);
+// Existing aggregate rows must be preserved (not discarded).
+assert.strictEqual(
+  upDb.prepare("SELECT support_count FROM insight_themes WHERE theme_key = 'noise'").get().support_count,
+  4,
+  'v1 -> v2 migration must preserve existing aggregate rows'
+);
+closeDatabase(upDb);
+
+// Idempotent re-open.
+const upDb2 = initDatabase(v1Path);
+assert.strictEqual(
+  upDb2.pragma('user_version', { simple: true }),
+  2,
+  'v1 -> v2 migration must be idempotent'
+);
+closeDatabase(upDb2);
+
+for (const p of v1Files) {
+  if (fs.existsSync(p)) fs.unlinkSync(p);
+}
+console.log('✔ Test 12 Passed: v1 -> v2 migration added summary column idempotently and preserved aggregates.');
 
 console.log('\n--- ALL DATABASE FOUNDATION TESTS PASSED SUCCESSFULLY! ---');

@@ -2,6 +2,21 @@ import { type SemaphoreProof } from '@semaphore-protocol/core';
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000/api';
 
+/**
+ * Wrapper around fetch that converts low-level network failures (backend down,
+ * DNS/connection refused, CORS) into a single friendly, user-facing message.
+ * HTTP error responses still flow through so callers can read their JSON body.
+ */
+async function apiFetch(url: string, init?: RequestInit): Promise<Response> {
+  try {
+    return await fetch(url, init);
+  } catch {
+    throw new Error(
+      'Could not reach the server. Please check that the backend is running and try again.'
+    );
+  }
+}
+
 export interface HealthResponse {
   ok: boolean;
   service?: string;
@@ -45,14 +60,39 @@ export interface SubmitResponse {
   reasons?: string[];
 }
 
+export interface InsightTopic {
+  topic_id: string;
+  server_day: string;
+  submission_count: number;
+  warn_count: number;
+}
+
+export interface InsightTheme {
+  topic_id: string;
+  server_day: string;
+  theme_key: string;
+  theme_label: string;
+  support_count: number;
+  summary: string | null;
+}
+
+export interface InsightsResponse {
+  ok: boolean;
+  threshold: number;
+  demoMode?: boolean;
+  topics: InsightTopic[];
+  themes: InsightTheme[];
+  error?: string;
+}
+
 export async function checkHealth(): Promise<HealthResponse> {
-  const res = await fetch(`${BASE_URL}/health`);
+  const res = await apiFetch(`${BASE_URL}/health`);
   if (!res.ok) throw new Error('Backend health check failed');
   return res.json();
 }
 
 export async function requestOtp(rollNo: string): Promise<{ ok: boolean; error?: string }> {
-  const res = await fetch(`${BASE_URL}/request-otp`, {
+  const res = await apiFetch(`${BASE_URL}/request-otp`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ rollNo }),
@@ -65,7 +105,7 @@ export async function requestOtp(rollNo: string): Promise<{ ok: boolean; error?:
 }
 
 export async function enrollStudent(payload: EnrollRequest): Promise<EnrollResponse> {
-  const res = await fetch(`${BASE_URL}/enroll`, {
+  const res = await apiFetch(`${BASE_URL}/enroll`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
@@ -78,7 +118,7 @@ export async function enrollStudent(payload: EnrollRequest): Promise<EnrollRespo
 }
 
 export async function getComplaintContext(): Promise<ComplaintContextResponse> {
-  const res = await fetch(`${BASE_URL}/complaint-context`);
+  const res = await apiFetch(`${BASE_URL}/complaint-context`);
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
     throw new Error(data.error || 'Failed to fetch complaint context');
@@ -91,7 +131,7 @@ export async function getComplaintContext(): Promise<ComplaintContextResponse> {
  * Endpoint: GET /api/semaphore-group
  */
 export async function getSemaphoreGroup(): Promise<SemaphoreGroupResponse> {
-  const res = await fetch(`${BASE_URL}/semaphore-group`);
+  const res = await apiFetch(`${BASE_URL}/semaphore-group`);
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
     throw new Error(data.error || 'Failed to fetch semaphore group');
@@ -100,7 +140,7 @@ export async function getSemaphoreGroup(): Promise<SemaphoreGroupResponse> {
 }
 
 export async function submitComplaint(payload: SubmitRequest): Promise<SubmitResponse> {
-  const res = await fetch(`${BASE_URL}/submit`, {
+  const res = await apiFetch(`${BASE_URL}/submit`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
@@ -112,6 +152,21 @@ export async function submitComplaint(payload: SubmitRequest): Promise<SubmitRes
     (err as any).status = res.status;
     (err as any).data = data;
     throw err;
+  }
+  return data;
+}
+
+/**
+ * Fetch privacy-safe aggregate insights. The backend already suppresses any
+ * bucket/theme below the k-anonymity threshold, so the response never exposes
+ * a single submission or any raw complaint content.
+ * Endpoint: GET /api/insights
+ */
+export async function getInsights(): Promise<InsightsResponse> {
+  const res = await apiFetch(`${BASE_URL}/insights`);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(data.error || 'Failed to fetch insights');
   }
   return data;
 }

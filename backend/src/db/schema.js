@@ -37,6 +37,7 @@ CREATE TABLE IF NOT EXISTS insight_themes (
   theme_key     TEXT NOT NULL,
   theme_label   TEXT NOT NULL,
   support_count INTEGER NOT NULL DEFAULT 0,
+  summary       TEXT,
   PRIMARY KEY (topic_id, server_day, theme_key)
 );
 `;

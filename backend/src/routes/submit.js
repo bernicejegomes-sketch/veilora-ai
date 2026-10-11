@@ -10,6 +10,8 @@ import { getGroupRoot } from '../semaphore/groupService.js';
 import { verifyComplaintProof } from '../services/proofVerificationService.js';
 import { moderateComplaintText } from '../services/moderationService.js';
 import { generateTrackingCode } from '../services/queueService.js';
+import { analyzeComplaint } from '../services/aiAnalysisService.js';
+import { upsertThemeSupport } from '../services/insightsService.js';
 
 const router = express.Router();
 
@@ -42,6 +44,9 @@ const router = express.Router();
  *     - UPSERT aggregate bucket in insights (topic_id + server_day counters)
  *       NOTE: the original complaint text is NEVER persisted. Only aggregate
  *       counters (submission_count, warn_count) are retained.
+ * 12b. Best-effort AI analysis of the in-memory text; generalized themes and a
+ *      short neutral summary are upserted into insight_themes. Failures are
+ *      swallowed and never affect the nullifier, aggregates, or the response.
  * 13. Return { ok: true, trackingCode: "..." }
  */
 router.post('/submit', async (req, res) => {
@@ -165,6 +170,20 @@ router.post('/submit', async (req, res) => {
         ok: false,
         error: 'Failed to process complaint submission'
       });
+    }
+
+    // 12b. Best-effort AI analysis (in-memory only, fail-safe).
+    // Runs ONLY after the atomic transaction above has committed, so a provider
+    // failure/timeout NEVER consumes a nullifier incorrectly or double-counts
+    // aggregates. The raw complaint text is passed in memory to the AI service
+    // (which truncates it for the request) and is never persisted or logged.
+    try {
+      const analysis = await analyzeComplaint({ text, topicId });
+      if (analysis.ok && Array.isArray(analysis.themes) && analysis.themes.length > 0) {
+        upsertThemeSupport(db, topicId, serverDay, analysis.themes, analysis.summary);
+      }
+    } catch {
+      // Best-effort: AI insights are optional and must never break anonymous submission.
     }
 
     // 13. Successful submission response

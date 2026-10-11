@@ -2,6 +2,7 @@ import React from 'react';
 import { Link } from 'react-router-dom';
 import { Shield, Lock } from 'lucide-react';
 import { isEnrolled } from '../services/identityStorage';
+import { SectionLink } from './SectionLink';
 
 export const Navbar: React.FC = () => {
   const enrolled = isEnrolled();
@@ -22,18 +23,24 @@ export const Navbar: React.FC = () => {
         </Link>
 
         <div className="flex items-center gap-6 text-sm">
-          <a
-            href="#how-it-works"
+          <SectionLink
+            sectionId="how-it-works"
             className="text-slate-300 hover:text-[#E2D64B] transition-colors hidden sm:inline-block font-medium"
           >
             How it works
-          </a>
-          <a
-            href="#privacy-model"
+          </SectionLink>
+          <SectionLink
+            sectionId="privacy-model"
             className="text-slate-300 hover:text-[#4AB7E0] transition-colors hidden sm:inline-block font-medium"
           >
             Privacy
-          </a>
+          </SectionLink>
+          <Link
+            to="/insights"
+            className="text-slate-300 hover:text-[#E2D64B] transition-colors hidden sm:inline-block font-medium"
+          >
+            AI Insights
+          </Link>
 
           {enrolled ? (
             <Link

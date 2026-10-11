@@ -72,7 +72,7 @@ try {
   // Test 5: no complaint text or identity fields leak
   assert.deepStrictEqual(
     Object.keys(res1.data).sort(),
-    ['ok', 'threshold', 'themes', 'topics'].sort(),
+    ['ok', 'threshold', 'demoMode', 'themes', 'topics'].sort(),
     'Response must only contain aggregate keys'
   );
   const serialized = JSON.stringify(res1.data).toLowerCase();
