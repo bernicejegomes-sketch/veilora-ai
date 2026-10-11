@@ -7,7 +7,7 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
-    "test": "node tests/test_database.js && node tests/test_enrollment.js && node tests/test_crypto_encoding.js && node tests/test_complaint_context.js && node tests/test_proof_verification.js && node tests/test_submission.js"
+    "test": "node tests/test_database.js && node tests/test_enrollment.js && node tests/test_crypto_encoding.js && node tests/test_complaint_context.js && node tests/test_proof_verification.js && node tests/test_submission.js && node tests/test_demo_and_ratelimit.js"
   },
   "dependencies": {
     "@semaphore-protocol/core": "^4.2.0",

@@ -10,6 +10,7 @@ import { issueOtp, resetAttempts, DEFAULT_DEV_OTP } from '../src/services/otpSer
 import { initGroup, rebuildGroup, getGroup, isValidCommitment } from '../src/semaphore/groupService.js';
 
 console.log('--- Running Incognito Enrollment Tests (Step 3B) ---');
+process.env.NODE_ENV = 'test';
 
 // Setup isolated test database
 const testDbPath = path.resolve('./data/test_enrollment.db');

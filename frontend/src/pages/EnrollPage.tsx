@@ -11,6 +11,15 @@ import {
   addKnownCommitment,
 } from '../services/identityStorage';
 
+// Exact development roster entries from backend/src/config/roster.js
+const DEMO_ROSTER: Record<string, { dob: string; name: string }> = {
+  DEV001: { dob: '2007-01-01', name: 'Test Student One' },
+  DEV002: { dob: '2007-02-02', name: 'Test Student Two' },
+  DEV003: { dob: '2007-03-03', name: 'Test Student Three' },
+  DEV004: { dob: '2007-04-04', name: 'Test Student Four' },
+  DEV005: { dob: '2007-05-05', name: 'Test Student Five' },
+};
+
 export const EnrollPage: React.FC = () => {
   const navigate = useNavigate();
 
@@ -23,6 +32,15 @@ export const EnrollPage: React.FC = () => {
   const [isEnrolling, setIsEnrolling] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
+
+  const handleRollNoChange = (newRollNo: string) => {
+    setRollNo(newRollNo);
+    const trimmedUpper = newRollNo.trim().toUpperCase();
+    if (DEMO_ROSTER[trimmedUpper]) {
+      setDob(DEMO_ROSTER[trimmedUpper].dob);
+      setName(DEMO_ROSTER[trimmedUpper].name);
+    }
+  };
 
   const handleRequestOtp = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -124,7 +142,7 @@ export const EnrollPage: React.FC = () => {
               <input
                 type="text"
                 value={rollNo}
-                onChange={(e) => setRollNo(e.target.value)}
+                onChange={(e) => handleRollNoChange(e.target.value)}
                 placeholder="e.g. DEV001"
                 className="flex-1 bg-[#091029] border border-[#4AB7E0]/30 rounded-lg px-3.5 py-2.5 text-sm text-[#F7F8FA] placeholder-slate-500 focus:outline-none focus:border-[#E2D64B] font-mono"
                 required

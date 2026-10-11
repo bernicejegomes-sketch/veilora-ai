@@ -31,7 +31,10 @@ router.post('/request-otp', (req, res) => {
     return res.status(409).json({ ok: false, error: 'already claimed' });
   }
 
-  issueOtp(db, rollNo);
+  const issueResult = issueOtp(db, rollNo);
+  if (issueResult && issueResult.ok === false) {
+    return res.status(503).json({ ok: false, error: issueResult.error });
+  }
 
   return res.status(200).json({ ok: true });
 });

@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { isDemoModeEnabled } from '../config/demoMode.js';
 
 // In-memory verification attempt tracking to prevent brute-force attacks
 const failedAttempts = new Map();
@@ -20,11 +21,17 @@ export function hashOtp(otp) {
  * Issue an OTP for a student roll number.
  * Updates members table with the SHA-256 hash, expiry, and resets otp_used.
  * 
- * In this hackathon MVP, uses DEFAULT_DEV_OTP or custom test OTP.
- * In a production setting, this would dispatch via SMS/email.
+ * If DEMO_MODE is disabled and no real OTP provider is configured, fails safely.
  */
-export function issueOtp(db, rollNo, otpValue = DEFAULT_DEV_OTP, ttlMs = OTP_TTL_MS) {
-  const otpHash = hashOtp(otpValue);
+export function issueOtp(db, rollNo, otpValue = null, ttlMs = OTP_TTL_MS) {
+  // If demo mode is not enabled and no external OTP value is supplied by a real provider,
+  // fail safely instead of silently generating/accepting the static development OTP.
+  if (!isDemoModeEnabled() && !otpValue) {
+    return { ok: false, error: 'OTP delivery unavailable: Demo mode is disabled and no real OTP provider is configured' };
+  }
+
+  const effectiveOtp = otpValue || DEFAULT_DEV_OTP;
+  const otpHash = hashOtp(effectiveOtp);
   const expiry = Date.now() + ttlMs;
 
   db.prepare(`

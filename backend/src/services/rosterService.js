@@ -1,10 +1,15 @@
 import { DEVELOPMENT_ROSTER } from '../config/roster.js';
+import { isDemoModeEnabled } from '../config/demoMode.js';
 
 /**
  * Synchronize the predefined development roster into the members table.
  * Preserves existing claims and OTP records.
+ * Only executes when DEMO_MODE is explicitly enabled.
  */
 export function syncRoster(db) {
+  if (!isDemoModeEnabled()) {
+    return;
+  }
   const insertStmt = db.prepare(`
     INSERT OR IGNORE INTO members (roll_no, dob, name, claimed)
     VALUES (?, ?, ?, 0)
